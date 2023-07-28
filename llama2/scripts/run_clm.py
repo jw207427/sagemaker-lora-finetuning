@@ -26,7 +26,7 @@ def parse_arge():
         help="Model id to use for training.",
     )
     parser.add_argument(
-        "--dataset_path", type=str, default="/opt/ml/input/data/training", help="Path to dataset."
+        "--dataset_path", type=str, default="lm_dataset", help="Path to dataset."
     )
     parser.add_argument(
         "--hf_token", type=str, default=HfFolder.get_token(), help="Path to dataset."
@@ -160,9 +160,6 @@ def create_peft_model(model, gradient_checkpointing=True, bf16=True):
 def training_function(args):
     # set seed
     set_seed(args.seed)
-    
-    print(args.dataset_path)
-    print(os.listdir(args.dataset_path))
 
     dataset = load_from_disk(args.dataset_path)
     # load model from the hub with a bnb config
@@ -179,7 +176,6 @@ def training_function(args):
         if args.gradient_checkpointing
         else True,  # this is needed for gradient checkpointing
         device_map="auto",
-        trust_remote_code=True,
         quantization_config=bnb_config,
     )
 
@@ -189,7 +185,7 @@ def training_function(args):
     )
 
     # Define training args
-    output_dir = "./tmp/model"
+    output_dir = "./tmp/llama2"
     training_args = TrainingArguments(
         output_dir=output_dir,
         per_device_train_batch_size=args.per_device_train_batch_size,
@@ -232,7 +228,6 @@ def training_function(args):
             output_dir,
             low_cpu_mem_usage=True,
             torch_dtype=torch.float16,
-            trust_remote_code=True,
         )  
         # Merge LoRA and base model and save
         model = model.merge_and_unload()        
