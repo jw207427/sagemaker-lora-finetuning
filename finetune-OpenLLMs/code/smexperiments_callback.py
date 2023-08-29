@@ -96,7 +96,7 @@ class SageMakerExperimentsCallback(TrainerCallback):
             if self.last_epoch is None:
                 self.last_epoch = 0
             
-            current_epoch = int(epoch_history[-1]['epoch'])
+            current_epoch = int(round(epoch_history[-1]['epoch']))
             
             print(f"[sm-callback] start: {self.last_epoch} ep to end: {current_epoch} ep!")
             
