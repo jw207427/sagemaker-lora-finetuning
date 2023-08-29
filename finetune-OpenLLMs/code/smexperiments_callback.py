@@ -20,7 +20,7 @@ class SageMakerExperimentsCallback(TrainerCallback):
     """
     def __init__(
         self, 
-        region="us-east-1",
+        region="us-west-2",
         _has_sagemaker_experiments=is_sagemaker_available()
     ):
         

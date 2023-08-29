@@ -65,6 +65,7 @@ def model_data_uri_from_model_package(model_group_name, region="us-east-1"):
 
     sagemaker_session = sagemaker.session.Session(boto3.session.Session(region_name=region))
     region = sagemaker_session.boto_region_name
+
     sm_client = boto3.client('sagemaker', region_name=region)
 
     model_packages = sm_client.list_model_packages(
@@ -171,6 +172,7 @@ def finetune_llm(args):
     train_dataset = load_from_disk(args.sm_train_dir)
     validation_dataset = load_from_disk(args.sm_validation_dir)
     
+    print(f"region: {args.region}")
     # gets the latest base model from model package group
     model_data_uri = model_data_uri_from_model_package(
         model_group_name=args.base_model_group_name,
@@ -184,6 +186,7 @@ def finetune_llm(args):
         source_s3_path=model_data_uri
     )
     
+    print(os.listdir(f"./{args.model_id}"))
     print(f"Untar base model to ./{args.model_id}")
     
     # load model from the hub with a bnb config
@@ -248,11 +251,35 @@ def finetune_llm(args):
     # Start evaluation
     trainer.evaluate()
     
-    # save finetuned LoRA model and then the tokenizer for inference
-    trainer.model.save_pretrained(
-        args.sm_model_dir, 
-        safe_serialization=True
-    )
+    temp_dir="/tmp/model/"
+    
+    if args.merge_weights:
+        
+        trainer.model.save_pretrained(temp_dir, safe_serialization=False)
+        # clear memory
+        del model
+        del trainer
+        torch.cuda.empty_cache()
+        
+        from peft import AutoPeftModelForCausalLM
+
+        # load PEFT model in fp16
+        model = AutoPeftModelForCausalLM.from_pretrained(
+            temp_dir,
+            low_cpu_mem_usage=True,
+            torch_dtype=torch.float16,
+        )  
+        # Merge LoRA and base model and save
+        model = model.merge_and_unload()        
+        model.save_pretrained(
+            args.sm_model_dir, safe_serialization=True, max_shard_size="2GB"
+        )       
+    else:   
+        # save finetuned LoRA model and then the tokenizer for inference
+        trainer.model.save_pretrained(
+            args.sm_model_dir, 
+            safe_serialization=True
+        )
     tokenizer.save_pretrained(
         args.sm_model_dir
     )
@@ -278,6 +305,11 @@ def read_parameters():
         "--task_type", 
         type=str, default="CAUSAL_LM", 
         help="Choose from: CAUSAL_LM, FEATURE_EXTRACTION, QUESTION_ANS, SEQ_2_SEQ_LM, SEQ_CLS, TOKEN_CLS"
+    )
+    parser.add_argument(
+        "--merge_weights",
+        action='store_true',
+        help="Whether to merge LoRA weights with base model.",
     )
     parser.add_argument("--sm_exp_logging_steps", type=int, default=2, help="Step interval to start logging to console/sagemaker experiments")
     parser.add_argument("--region", type=str, default="us-east-1", help="SageMaker job execution region")
