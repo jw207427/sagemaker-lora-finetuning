@@ -6,31 +6,27 @@ from typing import Any, Dict, Tuple
 import deepspeed
 import warnings
 import tarfile
-from peft import PeftModel
 
 predictor = None
-lora_dir = "./lora/"
-base_dir = "./base/"
+model_tar = "model.tar.gz"
 
 
 def get_model(properties):
     
     local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    cwd = os.getcwd()
+
+    print(os.listdir(cwd))
     
-    print(f"Loading model from {base_dir}")
-    base_model = AutoModelForCausalLM.from_pretrained(
-        base_dir, low_cpu_mem_usage=True,trust_remote_code=True,
-        torch_dtype=torch.bfloat16
+    print(f"Loading model from {cwd}")
+    model = AutoModelForCausalLM.from_pretrained(
+        cwd, low_cpu_mem_usage=True,trust_remote_code=True,
+torch_dtype=torch.bfloat16
     )
+    model = deepspeed.init_inference(model, mp_size=properties["tensor_parallel_degree"])
     
-    print(f"Loading LoRA adpater from {lora_dir}")
-    model = PeftModel.from_pretrained(base_model, lora_dir)
-    
-    model = deepspeed.init_inference(model,
-                                     mp_size=properties["tensor_parallel_degree"])
-    
-    print(f"Loading tokenizer from {base_dir}")
-    tokenizer = AutoTokenizer.from_pretrained(base_dir)
+    print(f"Loading tokenizer from {cwd}")
+    tokenizer = AutoTokenizer.from_pretrained(cwd)
     generator = pipeline(
         task="text-generation", model=model, tokenizer=tokenizer, device=local_rank
     )

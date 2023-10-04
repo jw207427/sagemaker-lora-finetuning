@@ -23,6 +23,7 @@ from datasets import load_from_disk
 import torch
 import bitsandbytes as bnb
 import sagemaker
+import shutil
 from smexperiments_callback import SageMakerExperimentsCallback
 
 
@@ -273,7 +274,17 @@ def finetune_llm(args):
         model = model.merge_and_unload()        
         model.save_pretrained(
             args.sm_model_dir, safe_serialization=True, max_shard_size="2GB"
-        )       
+        )   
+        
+        source_dir = './djl-inference/'
+
+        # copy djl-inference files to model directory
+        for f in os.listdir(source_dir):
+            source_f = os.path.join(source_dir, f)
+            
+            # Copy the files to the destination folder
+            shutil.copy(source_f, args.sm_model_dir)
+        
     else:   
         # save finetuned LoRA model and then the tokenizer for inference
         trainer.model.save_pretrained(
