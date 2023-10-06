@@ -240,7 +240,7 @@ def finetune_llm(args):
         train_dataset=train_dataset,
         eval_dataset=validation_dataset,
         data_collator=default_data_collator,
-        callbacks=[SageMakerExperimentsCallback]
+        callbacks=[SageMakerExperimentsCallback(region=args.region)]
     )
     
     # mutes warnings during training, reenable during inference
