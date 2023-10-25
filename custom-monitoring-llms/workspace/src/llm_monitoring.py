@@ -5,45 +5,40 @@ import os
 import re
 import base64
 import json
+import numpy as np
 
 from langchain.llms import Bedrock
+from langchain.embeddings import BedrockEmbeddings
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain.llms.utils import enforce_stop_tokens
 
-RELEVANCE_TEMPLATE = """\n\nHuman: Evaluate if the Answer is relevant to the Question. answer 1 if it is relevant. answer 0 if it is relevant.\n\nAssistant:I will only answer 1 or 0.
-\nHuman:
-Question: When is the scheduled launch date and time for the PSLV-C56 mission, and where will it be launched from?
-Answer:\nThe PSLV-C56 mission is scheduled to be launched on Sunday, 30 July 2023 at 06:30 IST / 01:00 UTC. It will be launched from the Satish Dhawan Space Centre, Sriharikota, Andhra Pradesh, India 
-\nAssistant: 1
-\nHuman:
-Question: {question}
-Answer: {answer}
-\nAssistant:
+RELEVANCE_TEMPLATE = """\n\nHuman: Generate question for the given answer.\n\nAssistant:Okay, give me an answer, and I will generate a question.
+\nHuman:Answer:\nThe PSLV-C56 mission is scheduled to be launched on Sunday, 30 July 2023 at 06:30 IST / 01:00 UTC. It will be launched from the Satish Dhawan Space Centre, Sriharikota, Andhra Pradesh, India 
+\nAssistant:Question:\nWhen is the scheduled launch date and time for the PSLV-C56 mission, and where will it be launched from?
+\nHuman:Answer:\n{answer}
+\nAssistant:Question:\n
 """ 
 
-EVALUATOR = PromptTemplate(template=RELEVANCE_TEMPLATE, input_variables=["question", "answer"])
+EVALUATOR = PromptTemplate(template=RELEVANCE_TEMPLATE, input_variables=["answer"])
 
-# Evaluate relevance between questions and answers
-def evaluate_relevance(questions, answers, llm):
-    score = 0
+# claculate how similar is the original question vs LLM generated questions
+# using cosine similarity
+def calculate_similarity(question, generated_questions, embeddings):
     
-    llm_chain = LLMChain(llm=llm, prompt=EVALUATOR)
-
-    for q, a in zip(questions, answers):
-        
-        try:
-            text = llm_chain.run(question=q, answer=a).strip()
-            text = enforce_stop_tokens(text, ["\n\nHuman:"])
-            print(f"\n-----------\n")
-            print(f"* {q} --> {a} --> <<{text}>>")
-            relevant = int(text)
-        except ValueError:
-            relevant = 0
-            
-        score += relevant
-
-    return score/ len(questions) * 100
+    question_vec = np.asarray(embeddings.embed_query(question)).reshape(1, -1)
+    gen_question_vec = np.asarray(
+        embeddings.embed_documents(generated_questions)
+    )
+    norm = np.linalg.norm(gen_question_vec, axis=1) * np.linalg.norm(
+        question_vec, axis=1
+    )
+    return (
+        np.dot(gen_question_vec, question_vec.T).reshape(
+            -1,
+        )
+        / norm
+    )
 
 def base64_to_string(base64_string):
     base64_bytes = base64_string.encode('ascii')
@@ -51,7 +46,7 @@ def base64_to_string(base64_string):
     return string_bytes.decode('utf-8')
 
 def extract_instructions(text):
-    pattern = r"### Instruction\n(.*?)\n\n"
+    pattern = r"### Instruction\n(.*?)\n"
     match = re.search(pattern, text)
     return match.group(1)
 
@@ -61,21 +56,36 @@ def extract_answers(text):
 
     return match.group(1) or match.group(2)   
 
+def extract_contexts(text):
+    pattern = r"### Context\n(.*?)\n\n### Answer"
+    match = re.search(pattern, text, re.DOTALL)
+    if match is None:
+        return ""
+    return match.group(1)
+
 # Helper function to extract question and answer from dataset
-def extract_qa(input_data, output_data):
+def extract_qac(input_data, output_data):
     question = extract_instructions(json.loads(input_data)["text"])
+
+    context = extract_contexts(json.loads(input_data)["text"])
     
     generated_text = json.loads(base64_to_string(output_data))["outputs"][0]["generated_text"]
     answer = extract_answers(generated_text)
-    return question, answer
+    return question, answer, context
 
 def main():    
     
     # Load dataset
     questions, answers = [], []
     infer_dir = os.environ['dataset_source']
+    
+    jsonl_files = pathlib.Path(infer_dir).rglob('*.jsonl')
+    
+    if not jsonl_files:
+        print('No *.jsonl files found.') 
+        exit()
 
-    for filepath in pathlib.Path(infer_dir).rglob('*.jsonl'):
+    for filepath in jsonl_files:
 
         with open(filepath.absolute(), 'r') as f:
             for line in f:
@@ -83,7 +93,7 @@ def main():
                 input_data = jsonl['captureData']['endpointInput']['data']
                 output_data = jsonl['captureData']['endpointOutput']['data']
                 
-                q, a = extract_qa (input_data, output_data)
+                q, a, c = extract_qac(input_data, output_data)
                 questions.append(q)
                 answers.append(a)
 
@@ -98,14 +108,27 @@ def main():
         client=boto3.client("bedrock-runtime", region_name='us-west-2'),
     )
     
-    # Evaluate relevance
-    score = evaluate_relevance(questions, answers, llm)
-    print(f"relevancy score: {score} /100")
+    llm_chain = LLMChain(llm=llm, prompt=EVALUATOR)
+        
+    embeddings= BedrockEmbeddings(
+        client=boto3.client("bedrock-runtime", region_name='us-west-2'),
+    )
 
-    # Save results
+    scores = []
+
+    for q, a in zip(questions, answers):
+        results = []
+        for i in range(5):
+            results.append(llm_chain.run(answer=a).strip())
+        cosine_sim = calculate_similarity(q, results, embeddings)
+        scores.append(cosine_sim.mean())
+
+    print(f"average relevancy score: {np.mean(scores)*100} /100")
+
     output = {
-        'relevancy': score/100,
-#         'end_time': os.environ['end_time']
+        "llm_metrics": {
+            "answer_relevancy": {"value": np.mean(scores), "standard_deviation": np.std(scores)},
+        },
     }
 
     with open(f"{os.environ['output_path']}/results.json", 'w') as f:
