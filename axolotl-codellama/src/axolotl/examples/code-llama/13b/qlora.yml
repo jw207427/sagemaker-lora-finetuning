@@ -1,24 +1,20 @@
-base_model: /opt/ml/input/data/model
-base_model_config: /opt/ml/input/data/model
-
+base_model: codellama/CodeLlama-13b-hf
+base_model_config: codellama/CodeLlama-13b-hf
 model_type: LlamaForCausalLM
-tokenizer_type: LlamaTokenizer
+tokenizer_type: CodeLlamaTokenizer
+is_llama_derived_model: true
+
 load_in_8bit: false
 load_in_4bit: true
 strict: false
 
-
 datasets:
-  - path: /opt/ml/input/data/train/spider_create_context_train.json
-    ds_type: json 
+  - path: mhenrichsen/alpaca_2k_test
     type: alpaca
-
-dataset_prepared_path: /tmp/last_run_prepared
+dataset_prepared_path:
 val_set_size: 0.01
-output_dir: /opt/ml/model
+output_dir: ./qlora-out
 
-dataset_prepared_path: last_run_prepared
-val_set_size: 0.02
 adapter: qlora
 lora_model_dir:
 
@@ -33,21 +29,25 @@ lora_target_modules:
 lora_target_linear: true
 lora_fan_in_fan_out:
 
-output_dir: /opt/ml/model
-checkpoint_dir: /opt/ml/checkpoints
+wandb_project:
+wandb_entity:
+wandb_watch:
+wandb_run_id:
+wandb_log_model:
 
-gradient_accumulation_steps: 2
+gradient_accumulation_steps: 4
 micro_batch_size: 2
-num_epochs: 2
+num_epochs: 3
 optimizer: paged_adamw_32bit
-torchdistx_path:
 lr_scheduler: cosine
 learning_rate: 0.0002
+
 train_on_inputs: false
 group_by_length: false
 bf16: true
 fp16: false
 tf32: false
+
 gradient_checkpointing: true
 early_stopping_patience:
 resume_from_checkpoint:
@@ -55,12 +55,10 @@ local_rank:
 logging_steps: 1
 xformers_attention:
 flash_attention: true
-gptq_groupsize:
-gptq_model_v1:
+
 warmup_steps: 10
-eval_steps: 50
-save_strategy: "no"
-save_total_limit: 1
+eval_steps: 20
+save_steps:
 debug:
 deepspeed:
 weight_decay: 0.0
@@ -70,5 +68,3 @@ special_tokens:
   bos_token: "<s>"
   eos_token: "</s>"
   unk_token: "<unk>"
-report_to: "tensorboard"
-logging_dir: "/opt/ml/output/tensorboard"

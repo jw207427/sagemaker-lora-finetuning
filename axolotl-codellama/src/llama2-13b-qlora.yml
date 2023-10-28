@@ -9,7 +9,7 @@ strict: false
 
 
 datasets:
-  - path: /opt/ml/input/data/train/spider_create_context_train.json
+  - path: /opt/ml/input/data/train/Open-Platypus.json
     ds_type: json 
     type: alpaca
 
